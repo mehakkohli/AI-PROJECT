@@ -1,0 +1,190 @@
+import heapq 
+import tkinter as tk
+from tkinter import ttk, messagebox
+import networkx as nx
+import matplotlib.pyplot as plt
+from geopy.distance import geodesic
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+# Define cities and coordinates
+cities = {
+    "Mumbai": (19.0760, 72.8777),
+    "Delhi": (28.7041, 77.1025),
+    "Kolkata": (22.5726, 88.3639),
+    "Chennai": (13.0827, 80.2707),
+    "Bengaluru": (12.9716, 77.5946),
+    "Hyderabad": (17.3850, 78.4867),
+    "Ahmedabad": (23.0225, 72.5714),
+    "Jaipur": (26.9124, 75.7873),
+    "Lucknow": (26.8467, 80.9462),
+    "Patna": (25.5941, 85.1376)
+}
+
+# Define edges (connections)
+edges = [
+    ("Mumbai", "Ahmedabad"), ("Mumbai", "Hyderabad"),
+    ("Delhi", "Jaipur"), ("Delhi", "Lucknow"),
+    ("Kolkata", "Patna"), ("Kolkata", "Chennai"),
+    ("Chennai", "Bengaluru"), ("Bengaluru", "Hyderabad"),
+    ("Ahmedabad", "Jaipur"), ("Hyderabad", "Patna"),
+    ("Lucknow", "Patna"), ("Bengaluru", "Mumbai")
+]
+
+# Create graph with edge weights as distances
+graph = nx.Graph()
+for city, coord in cities.items():
+    graph.add_node(city, pos=coord)
+
+for u, v in edges:
+    dist = geodesic(cities[u], cities[v]).km
+    graph.add_edge(u, v, weight=round(dist, 2))
+
+# Heuristic function for A*/Best-First/Hill Climbing
+def compute_heuristic(goal):
+    return {city: geodesic(cities[city], cities[goal]).km for city in cities}
+
+# Algorithms
+
+def bfs(start, goal):
+    from collections import deque
+    queue = deque([(start, [start])])
+    visited = set()
+    while queue:
+        node, path = queue.popleft()
+        if node == goal: return path
+        visited.add(node)
+        for neighbor in graph.neighbors(node):
+            if neighbor not in visited:
+                queue.append((neighbor, path + [neighbor]))
+    return None
+
+def dfs(start, goal, path=None, visited=None):
+    if path is None: path = [start]
+    if visited is None: visited = set()
+    if start == goal: return path
+    visited.add(start)
+    for neighbor in graph.neighbors(start):
+        if neighbor not in visited:
+            new_path = dfs(neighbor, goal, path + [neighbor], visited)
+            if new_path: return new_path
+    return None
+
+def best_first(start, goal, h):
+    queue = [(h[start], start, [start])]
+    visited = set()
+    while queue:
+        _, node, path = heapq.heappop(queue)
+        if node == goal: return path
+        visited.add(node)
+        for neighbor in graph.neighbors(node):
+            if neighbor not in visited:
+                heapq.heappush(queue, (h[neighbor], neighbor, path + [neighbor]))
+    return None
+
+def a_star(start, goal, h):
+    queue = [(h[start], 0, start, [start])]
+    visited = set()
+    while queue:
+        _, cost, node, path = heapq.heappop(queue)
+        if node == goal: return path
+        visited.add(node)
+        for neighbor in graph.neighbors(node):
+            if neighbor not in visited:
+                g = cost + graph.edges[node, neighbor]['weight']
+                f = g + h[neighbor]
+                heapq.heappush(queue, (f, g, neighbor, path + [neighbor]))
+    return None
+
+def hill_climb(start, goal, h):
+    path = [start]
+    current = start
+    while current != goal:
+        neighbors = list(graph.neighbors(current))
+        if not neighbors: return None
+        next_node = min(neighbors, key=lambda n: h[n])
+        if h[next_node] >= h[current]: return None
+        path.append(next_node)
+        current = next_node
+    return path
+
+def find_path(start, end, algo):
+    h = compute_heuristic(end)
+    if algo == 'BFS': return bfs(start, end)
+    elif algo == 'DFS': return dfs(start, end)
+    elif algo == 'Best-First': return best_first(start, end, h)
+    elif algo == 'A*': return a_star(start, end, h)
+    elif algo == 'Hill Climbing': return hill_climb(start, end, h)
+    return None
+
+# GUI with embedded graph display
+def launch_ui():
+    root = tk.Tk()
+    root.title("Smart Route Planner")
+    root.geometry("1000x600")
+
+    # UI Frame
+    control_frame = ttk.Frame(root, padding=10)
+    control_frame.pack(side=tk.LEFT, fill=tk.Y)
+
+    ttk.Label(control_frame, text="Start City:").pack(pady=5)
+    start_var = tk.StringVar()
+    ttk.Combobox(control_frame, textvariable=start_var, values=list(cities.keys()), state="readonly").pack()
+
+    ttk.Label(control_frame, text="End City:").pack(pady=5)
+    end_var = tk.StringVar()
+    ttk.Combobox(control_frame, textvariable=end_var, values=list(cities.keys()), state="readonly").pack()
+
+    ttk.Label(control_frame, text="Algorithm:").pack(pady=5)
+    algo_var = tk.StringVar(value="BFS")
+    ttk.Combobox(control_frame, textvariable=algo_var, values=["BFS", "DFS", "A*", "Best-First", "Hill Climbing"], state="readonly").pack()
+
+    result_text = tk.Text(control_frame, height=5, width=30)
+    result_text.pack(pady=10)
+
+    # Canvas Frame
+    canvas_frame = ttk.Frame(root)
+    canvas_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
+    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def on_find():
+        start = start_var.get()
+        end = end_var.get()
+        algo = algo_var.get()
+
+        if not start or not end:
+            messagebox.showwarning("Input Error", "Please select both start and end cities.")
+            return
+
+        path = find_path(start, end, algo)
+        if path:
+            total_distance = sum(graph.edges[path[i], path[i+1]]['weight'] for i in range(len(path) - 1))
+            result_text.delete("1.0", tk.END)
+            result_text.insert(tk.END, f"Path: {' -> '.join(path)}\nDistance: {round(total_distance, 2)} km")
+
+            # Redraw graph
+            ax.clear()
+            pos = nx.get_node_attributes(graph, 'pos')
+            nx.draw(graph, pos, ax=ax, with_labels=True, node_size=1200, node_color="#B3E5FC", edge_color="#BDBDBD", font_weight='bold', font_size=9)
+            nx.draw_networkx_edge_labels(graph, pos, ax=ax, edge_labels=nx.get_edge_attributes(graph, 'weight'), font_size=8, font_color='green')
+
+            path_edges = list(zip(path, path[1:]))
+            nx.draw_networkx_edges(graph, pos, ax=ax, edgelist=path_edges, edge_color='red', width=3, style='dashed')
+            nx.draw_networkx_nodes(graph, pos, nodelist=path, node_color='orange', node_size=1300)
+
+            ax.set_title(f"{algo} Path: {start} to {end} ({round(total_distance, 2)} km)", fontsize=12, color='blue')
+            ax.set_axis_off()
+            canvas.draw()
+        else:
+            result_text.delete("1.0", tk.END)
+            result_text.insert(tk.END, "No valid path found with the selected algorithm.")
+
+    ttk.Button(control_frame, text="Find Route", command=on_find).pack(pady=10)
+
+    root.mainloop()
+
+if __name__ == "__main__":
+
+    launch_ui()
